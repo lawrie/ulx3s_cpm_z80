@@ -72,9 +72,7 @@ module Microcomputer
    wire          n_int1;
    wire          n_int2;
    wire          n_romCS;
-   wire          n_externalRamCS;
-   wire          n_basRomCS;
-   wire [7:0]    basRomData;
+   wire          n_ramCS;
    wire          n_interface1CS;
    wire [7:0]    interface1DataOut;
    wire          n_interface2CS;
@@ -86,35 +84,33 @@ module Microcomputer
    reg [5:0]     cpuClkCount = 0;
    reg           cpuClock;
    wire          serialClock;
-   reg           sdClock;
    wire          driveLED;
+
+   // ===============================================================
+   // System Clock generation
+   // ===============================================================
+   wire clk250, clk;
+
+   pll pll_i (
+     .clkin(clk25_mhz),
+     .clkout0(clk250),
+     .clkout1(clk)
+   );
 
    // ===============================================================
    // Reset generation
    // ===============================================================
 
-   reg [25:0] pwr_up_reset_counter = 0; // hold reset low for ~1ms
+   reg [25:0] pwr_up_reset_counter = 0;
    wire       pwr_up_reset_n = &pwr_up_reset_counter;
 
-   always @(posedge clk25_mhz)
+   always @(posedge clk)
      begin
        if (!pwr_up_reset_n)
          pwr_up_reset_counter <= pwr_up_reset_counter + 1;
      end
 
-   wire          n_hard_reset = pwr_up_reset_n & btn[0];
-
-   // ===============================================================
-   // System Clock generation (25MHz)
-   // ===============================================================
-   wire clk125, clk, locked;
-
-   pll pll_i (
-     .clkin(clk25_mhz),
-     .clkout0(clk125),
-     .clkout1(clk),
-     .locked(locked)
-   );
+   wire n_hard_reset = pwr_up_reset_n & btn[0];
 
    // ____________________________________________________________________________________
    // CPU CHOICE GOES HERE
@@ -157,7 +153,7 @@ module Microcomputer
    
    wire [7:0] ramOut;
    
-   ram ram64(
+   ram ram56 (
      .clk(clk),
      .we(!n_memWR),
      .addr(cpuAddress - 16'h2000),
@@ -194,6 +190,9 @@ module Microcomputer
    reg clk_vga = 0;
    always @(posedge clk) clk_vga <= !clk_vga;
 
+   reg clk_hdmi = 0;
+   always @(posedge clk250) clk_hdmi <= !clk_hdmi;
+
    wire vga_blank;
 
    SBCTextDisplayRGB io2
@@ -226,7 +225,7 @@ module Microcomputer
     // Convert VGA to HDMI
     HDMI_out vga2dvid (
      .pixclk(clk_vga),
-     .pixclk_x5(clk125),
+     .pixclk_x5(clk_hdmi),
      .red({videoR1, videoR0, 6'b0}),
      .green({videoG1, videoG0, 6'b0}),
      .blue({videoB1, videoB0, 6'b0}),
@@ -280,8 +279,7 @@ module Microcomputer
 
    assign n_romCS = cpuAddress[15:13] != 0;
 
-   // Always enabled
-   assign n_externalRamCS = 1'b0;
+   assign n_ramCS = cpuAddress[15:13] == 0;
 
    // ____________________________________________________________________________________
    // BUS ISOLATION GOES HERE
@@ -290,7 +288,7 @@ module Microcomputer
                         n_interface2CS == 1'b 0 ? interface2DataOut   :
                             n_sdCardCS == 1'b 0 ? sdCardDataOut       :
 			       n_romCS == 1'b 0 ? romOut              :
-                       n_externalRamCS == 1'b 0 ? ramOut              :
+                               n_ramCS == 1'b 0 ? ramOut              :
                                                   8'h FF;
   // ____________________________________________________________________________________
   // SYSTEM CLOCKS GO HERE
