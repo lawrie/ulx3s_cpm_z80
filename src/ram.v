@@ -1,5 +1,4 @@
 module ram (
-                // Port A
                 input            clk,
                 input            we,
                 input [15:0]     addr,
@@ -7,10 +6,10 @@ module ram (
                 output reg [7:0] dout
             );
 
-   reg [7:0] ram [0:65535];
+   reg [7:0] ram [0:57343];
 
    always @(posedge clk)
-     begin
+     if (addr < 57344) begin
         if (we)
           ram[addr] <= din;
         dout <= ram[addr];

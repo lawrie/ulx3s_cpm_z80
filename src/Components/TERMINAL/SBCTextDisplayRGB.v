@@ -49,6 +49,7 @@ module SBCTextDisplayRGB
    output reg       videoB1,
    output reg       hSync,
    output reg       vSync,
+   output           blank,
    // Monochrome video signals
    output reg       video,
    output           sync,
@@ -1683,5 +1684,5 @@ module SBCTextDisplayRGB
       end
    end
 
-
+   assign blank = !hActive || !vActive;
 endmodule

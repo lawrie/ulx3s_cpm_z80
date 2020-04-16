@@ -87,14 +87,13 @@ module Microcomputer
    reg           cpuClock;
    wire          serialClock;
    reg           sdClock;
-   reg           clk = 0;
    wire          driveLED;
 
    // ===============================================================
    // Reset generation
    // ===============================================================
 
-   reg [15:0] pwr_up_reset_counter = 0; // hold reset low for ~1ms
+   reg [25:0] pwr_up_reset_counter = 0; // hold reset low for ~1ms
    wire       pwr_up_reset_n = &pwr_up_reset_counter;
 
    always @(posedge clk25_mhz)
@@ -108,11 +107,12 @@ module Microcomputer
    // ===============================================================
    // System Clock generation (25MHz)
    // ===============================================================
-   wire clk100, locked;
+   wire clk125, clk, locked;
 
    pll pll_i (
      .clkin(clk25_mhz),
-     .clkout0(clk100),
+     .clkout0(clk125),
+     .clkout1(clk),
      .locked(locked)
    );
 
@@ -147,7 +147,7 @@ module Microcomputer
    wire [7:0] romOut;
 
    ROM #(.MEM_INIT_FILE("../mem/CPM_BASIC.mem"), .A_WIDTH(13)) rom16 (
-     .clock(clk100),
+     .clock(clk),
      .address(cpuAddress[12:0]),
      .q(romOut)
    );
@@ -158,9 +158,9 @@ module Microcomputer
    wire [7:0] ramOut;
    
    ram ram64(
-     .clk(clk100),
+     .clk(clk),
      .we(!n_memWR),
-     .addr(cpuAddress),
+     .addr(cpuAddress - 16'h2000),
      .din(cpuDataOut),
      .dout(ramOut)
    );
@@ -191,6 +191,11 @@ module Microcomputer
    assign usb_fpga_pu_dp = 1;
    assign usb_fpga_pu_dn = 1;
 
+   reg clk_vga = 0;
+   always @(posedge clk) clk_vga <= !clk_vga;
+
+   wire vga_blank;
+
    SBCTextDisplayRGB io2
      (
       .n_reset(n_hard_reset),
@@ -214,8 +219,24 @@ module Microcomputer
       .dataIn(cpuDataOut),
       .dataOut(interface2DataOut),
       .ps2Clk(ps2Clk),
-      .ps2Data(ps2Data)
+      .ps2Data(ps2Data),
+      .blank(vga_blank)
       );
+
+    // Convert VGA to HDMI
+    HDMI_out vga2dvid (
+     .pixclk(clk_vga),
+     .pixclk_x5(clk125),
+     .red({videoR1, videoR0, 6'b0}),
+     .green({videoG1, videoG0, 6'b0}),
+     .blue({videoB1, videoB0, 6'b0}),
+     .vde(!vga_blank),
+     .hSync(hSync),
+     .vSync(vSync),
+     .gpdi_dp(gpdi_dp),
+     .gpdi_dn(gpdi_dn)
+   );
+
 `else
    assign interface2DataOut = 8'hff;
 `endif
@@ -276,9 +297,6 @@ module Microcomputer
   // SUB-CIRCUIT CLOCK SIGNALS
 
    assign serialClock = serialClkCount[15];
-
-   always @(posedge clk100)
-      clk <= !clk;
 
    always @(posedge clk) begin
       if(cpuClkCount < 4) begin
