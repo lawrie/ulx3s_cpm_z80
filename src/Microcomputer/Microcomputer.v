@@ -18,6 +18,7 @@
 // no timescale needed
 
 `define include_video
+`define include_uart
 
 module Microcomputer
   (
@@ -86,14 +87,16 @@ module Microcomputer
    wire          serialClock;
    wire          driveLED;
 
+   reg           ram8kWritten = 0;
+
    // ===============================================================
    // System Clock generation
    // ===============================================================
-   wire clk250, clk;
+   wire clk125, clk;
 
    pll pll_i (
      .clkin(clk25_mhz),
-     .clkout0(clk250),
+     .clkout0(clk125),
      .clkout1(clk)
    );
 
@@ -101,7 +104,7 @@ module Microcomputer
    // Reset generation
    // ===============================================================
 
-   reg [25:0] pwr_up_reset_counter = 0;
+   reg [15:0] pwr_up_reset_counter = 0;
    wire       pwr_up_reset_n = &pwr_up_reset_counter;
 
    always @(posedge clk)
@@ -155,8 +158,8 @@ module Microcomputer
    
    ram ram56 (
      .clk(clk),
-     .we(!n_memWR),
-     .addr(cpuAddress - 16'h2000),
+     .we(!n_ramCS & !n_memWR),
+     .addr(cpuAddress),
      .din(cpuDataOut),
      .dout(ramOut)
    );
@@ -164,6 +167,7 @@ module Microcomputer
    // ____________________________________________________________________________________
    // INPUT/OUTPUT DEVICES GO HERE
 
+`ifdef include_uart
    bufferedUART io1
      (
       .clk(clk),
@@ -181,21 +185,28 @@ module Microcomputer
       .n_dcd(1'b 0),
       .n_rts()
       );
+`else
+   assign interface1DataOut = 8'hff;
+`endif
 
 `ifdef include_video
    // pull-ups for us2 connector 
    assign usb_fpga_pu_dp = 1;
    assign usb_fpga_pu_dn = 1;
 
-   reg clk_vga = 0;
-   always @(posedge clk) clk_vga <= !clk_vga;
-
-   reg clk_hdmi = 0;
-   always @(posedge clk250) clk_hdmi <= !clk_hdmi;
+   reg clk_vga = clk;
+   reg clk_hdmi = clk125;
 
    wire vga_blank;
 
-   SBCTextDisplayRGB io2
+   SBCTextDisplayRGB 
+     #(.CLOCKS_PER_PIXEL(2),
+       .HORIZ_CHARS(40), 
+       .CLOCKS_PER_SCANLINE(800),
+       .HSYNC_CLOCKS(96),
+       .DISPLAY_LEFT_CLOCK(144),
+       .DISPLAY_TOP_SCANLINE(40 +31)
+     ) io2
      (
       .n_reset(n_hard_reset),
       .clk(clk),
@@ -240,6 +251,9 @@ module Microcomputer
    assign interface2DataOut = 8'hff;
 `endif
 
+   reg sdClk = 0;
+   always @(posedge clk) sdClk <= !sdClk;
+
    sd_controller sd1
      (
       .sdCS(sdCS),
@@ -253,7 +267,7 @@ module Microcomputer
       .dataOut(sdCardDataOut),
       .regAddr(cpuAddress[2:0]),
       .driveLED(driveLED),
-      .clk(clk)
+      .clk(sdClk)
       );
    
 
@@ -277,9 +291,14 @@ module Microcomputer
    // 8 Bytes $88-$8F
    assign n_sdCardCS = cpuAddress[7:3] == 5'b 10001 && (n_ioWR == 1'b 0 || n_ioRD == 1'b 0) ? 1'b 0 : 1'b 1;
 
-   assign n_romCS = cpuAddress[15:13] != 0;
+   assign n_romCS = ram8kWritten || cpuAddress[15:13] != 0;
 
-   assign n_ramCS = cpuAddress[15:13] == 0;
+   assign n_ramCS = 1'b 0; // Always selected
+
+   always @(posedge clk) begin
+     if (!n_hard_reset) ram8kWritten <= 0;
+     else if (!n_memWR && cpuAddress[15:13] == 0) ram8kWritten <= 1;
+   end
 
    // ____________________________________________________________________________________
    // BUS ISOLATION GOES HERE
@@ -297,14 +316,14 @@ module Microcomputer
    assign serialClock = serialClkCount[15];
 
    always @(posedge clk) begin
-      if(cpuClkCount < 4) begin
+      if(cpuClkCount < 2) begin
          // 4 = 10MHz, 3 = 12.5MHz, 2=16.6MHz, 1=25MHz
          cpuClkCount <= cpuClkCount + 1;
       end
       else begin
          cpuClkCount <= {6{1'b0}};
       end
-      if(cpuClkCount < 2) begin
+      if(cpuClkCount < 1) begin
          // 2 when 10MHz, 2 when 12.5MHz, 2 when 16.6MHz, 1 when 25MHz
          cpuClock <= 1'b 0;
       end
@@ -320,7 +339,7 @@ module Microcomputer
       // 9600 201
       // 4800 101
       // 2400 50
-      serialClkCount <= serialClkCount + 2416;
+      serialClkCount <= serialClkCount + (2 * 2416);
    end
 
    // ===============================================================

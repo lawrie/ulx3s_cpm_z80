@@ -6,10 +6,10 @@ module ram (
                 output reg [7:0] dout
             );
 
-   reg [7:0] ram [0:57343];
+   reg [7:0] ram [0:65535];
 
    always @(posedge clk)
-     if (addr < 57344) begin
+     begin
         if (we)
           ram[addr] <= din;
         dout <= ram[addr];
